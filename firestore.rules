@@ -1,0 +1,92 @@
+rules_version = '2';
+service cloud.firestore {
+
+  match /databases/{database}/documents {
+
+
+    function isModerator () {
+      return request.auth.token.isModerator == true;
+    }
+
+    function documentFieldsCheckout (requiredFields, optionalFields) {
+      let allFields = requiredFields.concat(optionalFields);
+      
+      return request.resource.data.keys().hasAll(requiredFields) &&
+        request.resource.data.keys().hasOnly(allFields);
+    }
+
+    function editOnlyChangesFields(allowedFields) {
+      let affectedKeys = request.resource.data.diff(resource.data).affectedKeys();
+
+      let unused = debug('** Affected keys debug in editOnlyChangesFields **');
+
+      return debug(affectedKeys.hasOnly(allowedFields));
+      // return debug(request.resource.data.keys().hasOnly(allowedFields)); 
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    match /readonly/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /users/{userId} {
+      allow write: if (request.auth.uid == userId);
+    }
+
+    match /posts/{postId} {
+      // function postHasAllRequiredFields() {
+
+      //   // DONT WASTE YOUR TIME LIKE THIS
+      //   // return request.resource.data.authorId != null &&
+      //   // request.resource.data.visibility != null && ...
+
+      //   // Instead:
+
+      //   let requiredFields = ['authorId','visibility','content', 'headline'];
+
+      //   return request.resource.data.keys().hasAll(requiredFields);
+      // }
+
+      // function postHasOnlyAllowedFields() {
+      //   let requiredFields = ['authorId','visibility','content','headline'];
+      //   let optionalFields = ['photo','tags','location'];
+      //   let allFields = requiredFields.concat(optionalFields);
+
+      //   return request.resource.data.keys().hasOnly(allFields);
+      // }
+
+
+      allow read: if(resource.data.visibility == 'public') || 
+      (resource.data.authorId == request.auth.uid);
+
+      allow update: if ((resource.data.authorId == request.auth.uid) || isModerator()) && 
+        editOnlyChangesFields(['visibility','content']);
+
+      allow create: if (request.resource.data.authorId == request.auth.uid) && 
+       documentFieldsCheckout(['authorId','visibility','content','headline'], ['photo','tags','location'])
+    }
+
+    match /rooms/{roomId} {
+      // Security rules for rooms should go here.
+        
+      function userIsRoomMod () {
+        return (request.auth.uid in (get(/databases/$(database)/documents/rooms/$(roomId)).data.roomMods)); 
+      }
+
+      match /posts/{postId} {
+        allow update: if (resource.data.authorId == request.auth.uid) ||
+          userIsRoomMod();
+
+          // $(database) es la variable global que apunta a nuestra bd local en Firestore, esta siendo capturada en la linea 4
+          // $(roomId) es la variable del roomId, capturado en linea 26
+          // .data devuelve el documento en key:value pairs
+      }
+    }
+
+  }
+
+}
